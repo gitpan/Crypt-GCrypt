@@ -1,10 +1,10 @@
 # ===========================================================================
-# Crypt::GCrypt - version 1.00 - 09 Oct 2005
+# Crypt::GCrypt - version 1.1 - 10 Oct 2005
 # 
 # Perl interface to the GNU Cryptographic library
 # 
 # Author: Alessandro Ranellucci <aar@cpan.org>
-# Copyright (c) 2005 - All Rights Reserved.
+# Copyright (c) 2005.
 # 
 # Use this software AT YOUR OWN RISK.
 # See below for documentation.
@@ -15,7 +15,7 @@ package Crypt::GCrypt;
 use strict;
 use warnings;
 
-our $VERSION = '1.00';
+our $VERSION = '1.1';
 
 require XSLoader;
 XSLoader::load('Crypt::GCrypt', $VERSION);
@@ -36,12 +36,14 @@ Crypt::GCrypt - Perl interface to the GNU Cryptographic library
     algorithm => 'aes', 
     mode => 'cbc'
   );
+  $cipher->start('encrypting');
   
   $cipher->setkey('my secret key');
   
   $cipher->setiv('my init vector');
   
   $ciphertext = $cipher->encrypt('plaintext');
+  $ciphertext .= $cipher->finish;
   
   $plaintext  = $cipher->decrypt($ciphertext);
 
@@ -53,6 +55,8 @@ being worked on.
 
 =head1 SYMMETRIC CRYPTOGRAPHY
 
+=head2 new()
+
 In order to encrypt/decrypt your data using a symmetric cipher you first have
 to build a Crypt::GCrypt object:
 
@@ -62,7 +66,7 @@ to build a Crypt::GCrypt object:
     mode => 'cbc'
   );
   
-The I<type> argument must be "cipher" and the I<algorithm> is required. See below
+The I<type> argument must be "cipher" and I<algorithm> is required too. See below
 for a description of available algorithms and other initialization parameters:
 
 =over 4
@@ -75,35 +79,51 @@ This may be one of the following:
 
 =item B<3des> 
 
-(Triple DES, 112 bit key)
+Triple-DES with 3 Keys as EDE.  The key size of this algorithm is
+168 but you have to pass 192 bits because the most significant
+bits of each byte are ignored.
 
 =item B<aes> 
 
-(The Advanced Encryption Standard, a.k.a. Rijndael, 128 bit key)
+AES (Rijndael) with a 128 bit key.
 
 =item B<aes192> 
 
-(AES with 192 bit key)
+AES (Rijndael) with a 192 bit key.
 
 =item B<aes256> 
 
-(AES with 256 bit key)
+AES (Rijndael) with a 256 bit key.
 
 =item B<blowfish>
 
+The blowfish algorithm. The current implementation allows only for 
+a key size of 128 bits (and thus is not compatible with Crypt::Blowfish).
+
 =item B<cast5>
+
+CAST128-5 block cipher algorithm.  The key size is 128 bits.
 
 =item B<des> 
 
-(Date Encryption Standard, 56 bit key, not very secure as it's too short)
+Standard DES with a 56 bit key. You need to pass 64 bit but the
+high bits of each byte are ignored.  Note, that this is a weak
+algorithm which can be broken in reasonable time using a brute
+force approach.
 
 =item B<twofish> 
 
-(Successor of Blowfish, 256 bit key)
+The Twofish algorithm with a 256 bit key.
+
+=item B<twofish128> 
+
+The Twofish algorithm with a 128 bit key.
 
 =item B<arcfour> 
 
-(Stream cipher)
+An algorithm which is 100% compatible with RSA Inc.'s RC4
+algorithm.  Note that this is a stream cipher and must be used
+very carefully to avoid a couple of weaknesses.
 
 =back
 
@@ -124,7 +144,8 @@ doesn't use an IV, encrypts each block independently
 
 =item B<cbc> 
 
-the current ciphertext block is encryption of current plaintext block xor-ed with last ciphertext block
+the current ciphertext block is encryption of current plaintext block 
+xor-ed with last ciphertext block
 
 =item B<cfb> 
 
@@ -140,12 +161,31 @@ of the last keystream block
 
 =back
 
-If no mode is specified B<cbc> is selected for block ciphers, and
-B<stream> for stream ciphers. Between blocks the previous one is stored in the IV.
+If no mode is specified then B<cbc> is selected for block ciphers, and
+B<stream> for stream ciphers.
 
+=item padding
+
+When the last block of plaintext is shorter than the block size, it must be 
+padded before encryption. Padding should permit a safe unpadding after 
+decryption. Crypt::GCrypt currently supports two methods:
+
+=over 8
+
+=item B<standard>
+
+This is also known as PKCS#5 padding, as it's binary safe. The string is padded
+with the number of bytes that should be truncated. It's compatible with Crypt::CBC.
+
+=item B<null>
+
+Only for text strings. The block will be padded with null bytes (00). If the last 
+block is a full block and blocksize is 8, a block of "0000000000000000" will be 
+appended.
+
+=back
 
 =item secure
-
 
 All data associated with this cipher will be put into non-swappable storage, 
 if possible.
@@ -158,53 +198,83 @@ Enable the CFB sync operation.
 
 Once you've got your cipher object the following methods are available:
 
-=over 4
+=head2 start()
 
-=item $cipher->setkey(I<KEY>)
+   $cipher->start('encrypting');
+   $cipher->start('decrypting');
+
+This method must be called before any call to setkey() or setiv(). It prepares
+the cipher for encryption or decryption, resetting the internal state.
+
+=head2 setkey()
+
+   $cipher->setkey('my secret key')
 
 Encryption and decryption operations will use I<KEY> until a different
 one is set. If I<KEY> is shorter than the cipher's keylen (see the
 C<keylen> method) it will be zero-padded, if it is longer it will be
 truncated.
 
-=item $cipher->setiv([I<IV>])
+=head2 setiv()
+
+   $cipher->setiv('my iv')
 
 Set the initialisation vector to I<IV> for the next encrypt/decrypt operation.
 If I<IV> is missing a "standard" IV of all zero is used. The same IV is set in
 newly created cipher objects.
 
-=item $cipher->encrypt(I<PLAINTEXT>)
+=head2 encrypt()
+
+   $cipher->encrypt($plaintext)
 
 This method encrypts I<PLAINTEXT> with $cipher, returning the
 corresponding ciphertext. Null byte padding is automatically appended
 if I<PLAINTEXT>'s length is not evenly divisible by $cipher's block
 size.
 
-=item $cipher->decrypt(I<CIPHERTEXT>)
+=head2 decrypt()
+
+   $cipher->decrypt($ciphertext)
 
 The counterpart to encrypt, decrypt takes a I<CIPHERTEXT> and produces the
 original plaintext (given that the right key was used, of course).
 
-=item $cipher->keylen()
+=head2 finish()
+
+   $cipher->finish;
+
+The CBC algorithm must buffer data blocks internally until there are even 
+multiples of the encryption algorithm's blocksize (typically 8 or 16 bytes).
+After the last call to encrypt() you should call finish() to flush the internal
+buffer and return any leftover ciphertext. The internal buffer will be padded
+before encryption (see the I<padding> option above).
+
+=head2 keylen()
+
+   print "Key length is " . $cipher->keylen();
 
 Returns the number of bytes of keying material this cipher needs.
 
-=item $cipher->blklen()
+=head2 blklen()
+
+   print "Block size is " . $cipher->blklen();
 
 As their name implies, block ciphers operate on blocks of data. This
 method returns the size of this blocks in bytes for this particular
 cipher. For stream ciphers C<1> is returned, since this implementation
-does not support feeding less than a byte into the cipher.
+does not feed less than a byte into the cipher.
 
-=item $cipher->sync()
+=head2 sync()
+
+   $cipher->sync();
 
 Apply the CFB sync operation.
 
-=head1 AVAILABILITY
+=head1 BUGS AND FEEDBACK
 
-Latest versions can be downloaded from CPAN. You are very welcome to write mail 
-to the author (aar@cpan.org) with your contributions, comments, suggestions, 
-bug reports or complaints.
+There are no known bugs. You are very welcome to write mail to the author 
+(aar@cpan.org) with your contributions, comments, suggestions, bug reports 
+or complaints.
 
 =head1 AUTHOR
 
@@ -218,7 +288,7 @@ the same terms as Perl itself.
 
 =head1 ACKNOWLEDGEMENTS
 
-This module is partially inspired by the GCrypt.pm bindings made by 
+This module was initially inspired by the GCrypt.pm bindings made by 
 Robert Bihlmeyer in 2002.
 
 =head1 DISCLAIMER

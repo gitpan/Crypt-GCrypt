@@ -1,3 +1,16 @@
+/*
+ ===========================================================================
+ Crypt::GCrypt
+
+ Perl interface to the GNU Cryptographic library
+ 
+ Author: Alessandro Ranellucci <aar@cpan.org>
+ Copyright (c) 2005.
+ 
+ Use this software AT YOUR OWN RISK.
+ ===========================================================================
+*/
+
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
@@ -5,24 +18,41 @@
 #include "ppport.h"
 
 #include <gcrypt.h>
+#include <string.h>
 
 static const char my_name[] = "Crypt::GCrypt";
 static const char author[] = "Alessandro Ranellucci <aar@cpan.org>";
 
-enum cg_
-  {
-    CG_ACTION_CIPHER,
-    CG_ACTION_ASYMM
-  };
+enum cg_type
+{
+	CG_TYPE_CIPHER,
+	CG_TYPE_ASYMM
+};
+enum cg_action
+{
+	CG_ACTION_NONE,
+	CG_ACTION_ENCRYPT,
+	CG_ACTION_DECRYPT
+};
+enum cg_padding
+{
+	CG_PADDING_STANDARD,
+	CG_PADDING_NULL,
+	CG_PADDING_SPACE
+};
 
 struct Crypt_GCrypt_s {
 	int type;
+	int action;
 	gcry_cipher_hd_t h;
 	gcry_ac_handle_t h_ac;
 	gcry_ac_key_t key_ac;
 	gcry_error_t err;
 	int mode;
+	int padding;
 	unsigned int blklen, keylen;
+	char *buffer;
+	int buflen;
 };
 typedef struct Crypt_GCrypt_s *Crypt_GCrypt;
 
@@ -50,7 +80,9 @@ cg_new(...)
 			
 		/* Default values: */
 		RETVAL->type = -1;
-		c_flags = GCRY_CIPHER_CBC_CTS;
+		RETVAL->padding = CG_PADDING_STANDARD;
+		RETVAL->action = CG_ACTION_NONE;
+		c_flags = 0;
 		ac_flags = 0;
 		have_mode = 0;
 		
@@ -60,9 +92,9 @@ cg_new(...)
 			if (strcmp(s, "type") == 0) {
 				s = SvPV_nolen(ST(i+1));
 				if (strcmp(s, "cipher") == 0)
-					RETVAL->type = CG_ACTION_CIPHER;
+					RETVAL->type = CG_TYPE_CIPHER;
 				if (strcmp(s, "asymm") == 0)
-					RETVAL->type = CG_ACTION_ASYMM;
+					RETVAL->type = CG_TYPE_ASYMM;
 			}
 			if (strcmp(s, "algorithm") == 0) {
 				algo_s = SvPV_nolen(ST(i+1));
@@ -70,6 +102,13 @@ cg_new(...)
 			if (strcmp(s, "mode") == 0) {
 				mode_s = SvPV_nolen(ST(i+1));
 				have_mode = 1;
+			}
+			if (strcmp(s, "padding") == 0) {
+				s = SvPV_nolen(ST(i+1));
+				if (strcmp(s, "standard") == 0)
+					RETVAL->padding = CG_PADDING_STANDARD;
+				if (strcmp(s, "null") == 0)
+					RETVAL->padding = CG_PADDING_NULL;
 			}
 			if (strcmp(s, "secure") == 0) {
 				if (SvTRUE(ST(i+1))) c_flags |= GCRY_CIPHER_SECURE;
@@ -84,7 +123,7 @@ cg_new(...)
 		if (!algo_s)
 			croak("No algorithm specified for Crypt::GCrypt->new()");
 
-		if (RETVAL->type == CG_ACTION_CIPHER) {
+		if (RETVAL->type == CG_TYPE_CIPHER) {
 			/* Checking algorithm */
 			if (!(algo = gcry_cipher_map_name(algo_s)))
 				croak("Unknown algorithm %s", algo_s);
@@ -124,7 +163,7 @@ cg_new(...)
 			RETVAL->err = gcry_cipher_open(&RETVAL->h, algo, RETVAL->mode, c_flags);
 			if (RETVAL->h == NULL) XSRETURN_UNDEF;
 		}
-		if (RETVAL->type == CG_ACTION_ASYMM) {
+		if (RETVAL->type == CG_TYPE_ASYMM) {
 		
 			croak("Asymmetric cryptography is not yet supported by Crypt::GCrypt");
 			
@@ -146,33 +185,89 @@ cg_encrypt(gcr, in)
 	Crypt_GCrypt gcr;
 	SV *in;
     PREINIT:
-		char *ibuf, *obuf;
-		size_t len, ilen;
-		int i, error;
+		char *ibuf, *curbuf, *obuf;
+		size_t len, ilen, buflen;
     CODE:
-		ibuf = SvPV(ST(1), ilen);
-		if (1) {
-			if ((len = ilen % gcr->blklen) == 0) {
-				len = ilen;
-			} else {
-				char *b;
-				len = ilen + gcr->blklen - len;
-				New(0, b, len, char);
-				memcpy(b, ibuf, ilen);
-				memset(b + ilen, 0, len - ilen);
-				ibuf = b;
-			}
-		} else {
+    	if (gcr->action != CG_ACTION_ENCRYPT)
+    		croak("start('encrypting') was not called");
+    	
+		ibuf = SvPV(in, ilen);
+		
+		/* Get total buffer+ibuf length */
+		Newz(0, curbuf, ilen + gcr->buflen, char);
+		memcpy(curbuf, gcr->buffer, gcr->buflen);
+		memcpy(curbuf+gcr->buflen, ibuf, ilen);
+		
+		
+		if ((len = (ilen+gcr->buflen) % gcr->blklen) == 0) {
 			len = ilen;
+			gcr->buflen = 0;
+		} else {
+			char *tmpbuf;
+			len = (ilen+gcr->buflen) - len;   /* len contiene i byte da scrivere effettivemente */
+			
+			Newz(0, tmpbuf, len, char);
+			memcpy(tmpbuf, curbuf, len);
+			memcpy(gcr->buffer, curbuf+len, (ilen+gcr->buflen)-len);
+			gcr->buflen = (ilen+gcr->buflen)-len;
+			curbuf = tmpbuf;
+			Safefree(tmpbuf);
 		}
-		New(0, obuf, len, char);
-		if ((error = gcry_cipher_encrypt(gcr->h, obuf, len, ibuf, len)) != 0)
-			croak("encrypt: %s", gcry_strerror(error));
-		if (len != ilen)
-			Safefree(ibuf);
+
+		/* Encrypt data */
+		if (len > 0) {
+			New(0, obuf, len, char);
+			if ((gcr->err = gcry_cipher_encrypt(gcr->h, obuf, len, curbuf, len)) != 0)
+				croak("encrypt: %s", gcry_strerror(gcr->err));
+		}
 		RETVAL = newSVpvn(obuf, len);
     OUTPUT:
 		RETVAL
+
+SV *
+cg_finish(gcr)
+	Crypt_GCrypt gcr;
+    PREINIT:
+		char *obuf;
+		size_t rlen;
+    CODE:
+    	if (gcr->action != CG_ACTION_ENCRYPT)
+    		croak("start('encrypting') was not called");
+    	if (gcr->buflen < gcr->blklen) {
+    		rlen = gcr->blklen - gcr->buflen;
+    		char *tmpbuf;
+    		Newz(0, tmpbuf, gcr->buflen+rlen, char);
+    		memcpy(tmpbuf, gcr->buffer, gcr->buflen);
+    		switch (gcr->padding) {
+    			case CG_PADDING_STANDARD:
+	    			memset(tmpbuf + gcr->buflen, rlen, rlen);
+	    			break;
+    			case CG_PADDING_NULL:
+	    			memset(tmpbuf + gcr->buflen, 0, rlen);
+	    			break;
+    			case CG_PADDING_SPACE:
+	    			memset(tmpbuf + gcr->buflen, '\32', rlen);
+	    			break;
+	    	}
+    		gcr->buffer = tmpbuf;
+    	} else {
+    		if (gcr->padding == CG_PADDING_NULL && gcr->blklen == 8) {
+    			char *tmpbuf;
+    			Newz(0, tmpbuf, gcr->buflen+8, char);
+    			memcpy(tmpbuf, gcr->buffer, gcr->buflen);
+    			memset(tmpbuf + gcr->buflen, 0, 8);
+    			gcr->buffer = tmpbuf;
+    		}
+    	}
+    	Newz(0, obuf, gcr->blklen, char);
+		if ((gcr->err = gcry_cipher_encrypt(gcr->h, obuf, gcr->blklen, gcr->buffer, gcr->blklen)) != 0)
+			croak("encrypt: %s", gcry_strerror(gcr->err));
+		gcr->buffer[0] = '\0';
+		RETVAL = newSVpvn(obuf, gcr->blklen);
+    OUTPUT:
+		RETVAL
+
+
 
 SV *
 cg_decrypt(gcr, in)
@@ -180,30 +275,47 @@ cg_decrypt(gcr, in)
 	SV *in;
     PREINIT:
 		char *ibuf, *obuf;
-		size_t len, ilen;
+		size_t len, ilen, dlen, plen;
 		int error;
     CODE:
+    	if (gcr->action != CG_ACTION_DECRYPT)
+    		croak("start('encrypting') was not called");
 		ibuf = SvPV(ST(1), ilen);
-		if (1) {
-			if ((len = ilen % gcr->blklen) == 0) {
-				len = ilen;
-			} else {
-				char *b;
-				len = ilen + gcr->blklen - len;
-				New(0, b, len, char);
-				memcpy(b, ibuf, ilen);
-				memset(b + ilen, 0, len - ilen);
-				ibuf = b;
-			}
+		if ((len = ilen % gcr->blklen) == 0) {
+			len = ilen;
 		} else {
-		  len = ilen;
+			croak("input must be a multiple of blklen");
+			char *b;
+			len = ilen + gcr->blklen - len;
+			New(0, b, len, char);
+			memcpy(b, ibuf, ilen);
+			memset(b + ilen, 0, len - ilen);
+			ibuf = b;
 		}
 		New(0, obuf, len, char);
 		if ((error = gcry_cipher_decrypt(gcr->h, obuf, len, ibuf, len)) != 0)
 			croak("decrypt: %s", gcry_strerror(error));
 		if (len != ilen)
 			Safefree(ibuf);
-		RETVAL = newSVpvn(obuf, len);
+		
+		/* Remove padding */
+		dlen = len;
+    	switch (gcr->padding) {
+			case CG_PADDING_STANDARD:
+				plen = (int) obuf[len-1];
+				if (obuf[len-1] == obuf[len-plen])
+					dlen = len - plen;
+	    		break;
+			case CG_PADDING_NULL:
+				dlen = strchr(obuf, '\0') - obuf;
+	    		break;
+			case CG_PADDING_SPACE:
+				/* This is not secure, we have to rewrite it: */
+				dlen = strchr(obuf, '\32') - obuf;
+	    		break;
+		}
+		/* printf("dlen: %d\n", dlen); */
+		RETVAL = newSVpvn(obuf, dlen);
     OUTPUT:
 		RETVAL
 
@@ -238,35 +350,60 @@ cg_sign(gcr, in)
 		RETVAL
 
 void
+cg_start(gcr, act)
+	Crypt_GCrypt gcr;
+	SV *act;
+    PREINIT:
+		char *action;
+		size_t len;
+    CODE:
+    	gcr->err = gcry_cipher_reset(gcr->h);
+    	New(0, gcr->buffer, gcr->blklen, char);
+    	gcr->buflen = 0;
+    	action = SvPV(act, len);
+    	switch (action[0]) {
+    		case 'e':
+    			gcr->action = CG_ACTION_ENCRYPT;
+    			break;
+    		case 'd':
+    			gcr->action = CG_ACTION_DECRYPT;
+    			break;
+    	}
+
+void
 cg_setkey(gcr, ...)
 	Crypt_GCrypt gcr;
 	PREINIT:
 		char *k, *pk, *s;
-		char **mykey;
+		char *mykey;
 		gcry_ac_key_type_t keytype;
 		gcry_ac_data_t keydata;
 		gcry_mpi_t mpi;
 		size_t len;
     CODE:
+    	if (gcr->action == CG_ACTION_NONE)
+    		croak("start() must be called before setkey()");
 		/* Set key for cipher */
-		if (gcr->type == CG_ACTION_CIPHER) {
+		if (gcr->type == CG_TYPE_CIPHER) {
+			Newz(0, k, gcr->keylen, char);
 			k = SvPV(ST(1), len);
 			/* If key is shorter than our algorithm's key size 
 		  	 let's pad it with zeroes */
 			if (len >= gcr->keylen) {
-				*mykey = k;
+				mykey = k;
 			} else {
-				New(0, pk, gcr->keylen, char);
+				Newz(0, pk, gcr->keylen, char);
 				memcpy(pk, k, len);
 				memset(pk + len, 0, gcr->keylen - len);
-				*mykey = pk;
+				mykey = pk;
 			}
-			gcry_cipher_setkey(gcr->h, *mykey,  gcr->keylen);
+			gcr->err = gcry_cipher_setkey(gcr->h, mykey,  gcr->keylen);
+			if (gcr->err != 0) croak("setkey: %s", gcry_strerror(gcr->err));
 			if (*pk) Safefree(pk);
 		}
 		
 		/* Set key for asymmetric criptography */
-		if (gcr->type == CG_ACTION_ASYMM) {
+		if (gcr->type == CG_TYPE_ASYMM) {
 			k = SvPV(ST(2), len);
 			
 			/* Key type */
@@ -292,9 +429,9 @@ cg_setiv(gcr, ...)
 		char *iv;
 		size_t len;
     CODE:
-    	if (gcr->type != CG_ACTION_CIPHER)
+    	if (gcr->type != CG_TYPE_CIPHER)
     		croak("Can't call setiv when doing non-cipher operations");
-		New(0, iv, gcr->blklen, char);
+		Newz(0, iv, gcr->blklen, char);
 		if (items == 2) {
 			char *param;
 			param = SvPV(ST(1), len);
@@ -313,7 +450,7 @@ void
 cg_sync(gcr)
 	Crypt_GCrypt gcr;
     CODE:
-    	if (gcr->type != CG_ACTION_CIPHER)
+    	if (gcr->type != CG_TYPE_CIPHER)
     		croak("Can't call sync when doing non-cipher operations");
 		gcry_cipher_sync(gcr->h);
 
@@ -321,7 +458,7 @@ int
 cg_keylen(gcr)
 	Crypt_GCrypt gcr;
     CODE:
-    	if (gcr->type != CG_ACTION_CIPHER)
+    	if (gcr->type != CG_TYPE_CIPHER)
     		croak("Can't call keylen when doing non-cipher operations");
 		RETVAL = gcr->keylen;
     OUTPUT:
@@ -331,7 +468,7 @@ int
 cg_blklen(gcr)
 	Crypt_GCrypt gcr;
     CODE:
-    	if (gcr->type != CG_ACTION_CIPHER)
+    	if (gcr->type != CG_TYPE_CIPHER)
     		croak("Can't call blklen when doing non-cipher operations");
 		RETVAL = gcr->blklen;
     OUTPUT:
@@ -341,10 +478,10 @@ void
 cg_DESTROY(gcr)
 	Crypt_GCrypt gcr;
     CODE:
-    	if (gcr->type == CG_ACTION_CIPHER) {
+    	if (gcr->type == CG_TYPE_CIPHER) {
 			gcry_cipher_close(gcr->h);
 		}
-    	if (gcr->type == CG_ACTION_ASYMM) {
+    	if (gcr->type == CG_TYPE_ASYMM) {
 			gcry_ac_close(gcr->h_ac);
 		}
 		Safefree(gcr);
