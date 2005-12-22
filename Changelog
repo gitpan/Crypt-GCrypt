@@ -1,0 +1,18 @@
+$Id: Changelog 2005/10/09 20:14 $
+
+version 1.1.1 (2005/12/22):
+
+    - minor bug fixes
+    - fixed typo in POD
+    - improved Makefile.PL for locating libgcrypt
+    - added t/03-pod.t and t/04-podcoverage.t
+
+version 1.1 (2005/10/10):
+	
+	- added finish() to handle partial blocks
+	- added padding with null and standard methods
+	- added compatibility test with Crypt::CBC
+
+version 1.00 (2005/10/09):
+
+	- new
