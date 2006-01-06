@@ -15,7 +15,7 @@ package Crypt::GCrypt;
 use strict;
 use warnings;
 
-our $VERSION = '1.1.2';
+our $VERSION = '1.14';
 
 require XSLoader;
 XSLoader::load('Crypt::GCrypt', $VERSION);
@@ -40,10 +40,10 @@ Crypt::GCrypt - Perl interface to the GNU Cryptographic library
   
   $cipher->setkey('my secret key');
   $cipher->setiv('my init vector');
-  
+
   $ciphertext = $cipher->encrypt('plaintext');
   $ciphertext .= $cipher->finish;
-  
+
   $plaintext  = $cipher->decrypt($ciphertext);
 
 =head1 ABSTRACT
@@ -59,12 +59,12 @@ cryptography is being worked on.
 In order to encrypt/decrypt your data using a symmetric cipher you first have
 to build a Crypt::GCrypt object:
 
-  $cipher = GCrypt::Cipher->new(
+  $cipher = Crypt::GCrypt->new(
     type => 'cipher',
     algorithm => 'aes', 
     mode => 'cbc'
   );
-  
+
 The I<type> argument must be "cipher" and I<algorithm> is required too. See below
 for a description of available algorithms and other initialization parameters:
 
@@ -224,29 +224,29 @@ newly created cipher objects.
 
 =head2 encrypt()
 
-   $cipher->encrypt($plaintext);
+   $ciphertext = $cipher->encrypt($plaintext);
 
 This method encrypts I<$plaintext> with I<$cipher>, returning the
-corresponding ciphertext. Null byte padding is automatically appended
-if I<PLAINTEXT>'s length is not evenly divisible by $cipher's block
-size.
-
-=head2 decrypt()
-
-   $cipher->decrypt($ciphertext);
-
-The counterpart to encrypt, decrypt takes a I<$ciphertext> and produces the
-original plaintext (given that the right key was used, of course).
+corresponding ciphertext. The output is buffered; this means that
+you'll only get multiples of $cipher's block size and that at the 
+end you'll have to call L</"finish()">.
 
 =head2 finish()
 
-   $cipher->finish;
+    $ciphertext .= $cipher->finish;
 
 The CBC algorithm must buffer data blocks internally until there are even 
 multiples of the encryption algorithm's blocksize (typically 8 or 16 bytes).
 After the last call to encrypt() you should call finish() to flush the internal
 buffer and return any leftover ciphertext. The internal buffer will be padded
-before encryption (see the I<padding> option above).
+before encryption (see the L</padding> option above).
+
+=head2 decrypt()
+
+   $plaintext = $cipher->decrypt($ciphertext);
+
+The counterpart to encrypt, decrypt takes a I<$ciphertext> and produces the
+original plaintext (given that the right key was used, of course).
 
 =head2 keylen()
 
@@ -288,7 +288,7 @@ the same terms as Perl itself.
 =head1 ACKNOWLEDGEMENTS
 
 This module was initially inspired by the GCrypt.pm bindings made by 
-Robert Bihlmeyer in 2002.
+Robert Bihlmeyer in 2002. Thanks to users who give feedback (see Changelog).
 
 =head1 DISCLAIMER
 

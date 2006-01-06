@@ -30,17 +30,17 @@ if (not $gcrypt_libpath and $] >= 5.006001) {
 }
 
 # 
-my $found = 0;
+my $libfound = 0;
 unless ($gcrypt_libpath) {
 	# Test for existence of libgcrypt
 	foreach (split /\s+/, $Config{libpth}) {
 		if (-f "$_/libgcrypt." . $Config{so}) {
-		$found = 1;
+		$libfound = 1;
 		last;
 	}
 }
 
-unless ($found) {
+unless ($libfound) {
     die <<'PREREQ_MISSING;';
 
 libgcrypt must be installed prior to building Crypt::GCrypt and I can't 
@@ -72,8 +72,8 @@ PREREQ_MISSING;
 
 # now build the options list for WriteMakefile()
 my @extras = ();
-push(@extras, INC => "-I$gcrypt_libpath")
-  if $gcrypt_libpath;
+push(@extras, INC => "-I$gcrypt_incpath")
+  if $gcrypt_incpath;
 
 my $libs = '-lgcrypt';
 $libs = "-L$gcrypt_libpath $libs"
