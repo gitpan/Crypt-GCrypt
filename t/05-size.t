@@ -1,7 +1,10 @@
-use Test::More tests => 1;
+use Test::More;
 
-plan skip_all => "Devel::Size required for testing memory"
-	unless eval { use Devel::Size qw[total_size]; 1 };
+if (eval "use Devel::Size qw[total_size]; 1") {
+	plan tests => 1;
+} else {
+	plan skip_all => "Devel::Size required for testing memory";
+}
 
 use ExtUtils::testlib;
 use Crypt::GCrypt;

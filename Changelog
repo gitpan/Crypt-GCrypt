@@ -1,4 +1,8 @@
-$Id: Changelog 2006/01/06 17:01 $
+$Id: Changelog 2006/01/06 17:50 $
+
+version 1.15 (2006/01/06):
+	
+	- fixed t/05-size.t (now skips if we don't have Devel::Size)
 
 version 1.14 (2006/01/06):
 
