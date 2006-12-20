@@ -4,7 +4,7 @@
 # Perl interface to the GNU Cryptographic library
 # 
 # Author: Alessandro Ranellucci <aar@cpan.org>
-# Copyright (c) 2005.
+# Copyright (c) 2005-06.
 # 
 # Use this software AT YOUR OWN RISK.
 # See below for documentation.
@@ -15,7 +15,7 @@ package Crypt::GCrypt;
 use strict;
 use warnings;
 
-our $VERSION = '1.15';
+our $VERSION = '1.16';
 
 require XSLoader;
 XSLoader::load('Crypt::GCrypt', $VERSION);

@@ -35,7 +35,8 @@ skip(!($HAVE_CRYPT_CBC && $HAVE_CAST5), sub {
 		-literal_key => 1,
 		-cipher => 'CAST5',
 		-padding => 'standard',
-		-iv => "12345678"
+		-iv => "12345678",
+		-header => "none"
 	);
 	$cipher->start('decrypting');
 	my $d = $cipher->crypt($e);
