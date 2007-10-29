@@ -1,5 +1,7 @@
-Changelog for Crypt::GCrypt
----------------------------
+version 1.17 (2007/10/29):
+
+    - removed warnings on platforms with signed chars
+      (untested)
 
 version 1.16 (2006/12/20):
 	
