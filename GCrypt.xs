@@ -36,6 +36,7 @@ enum cg_action
 };
 enum cg_padding
 {
+    CG_PADDING_NONE,
 	CG_PADDING_STANDARD,
 	CG_PADDING_NULL,
 	CG_PADDING_SPACE
@@ -52,9 +53,48 @@ struct Crypt_GCrypt_s {
 	int padding;
 	unsigned int blklen, keylen;
 	unsigned char *buffer;
-	int buflen;
+	size_t buflen;
+    int need_to_call_finish;
+    int buffer_is_decrypted;
 };
 typedef struct Crypt_GCrypt_s *Crypt_GCrypt;
+
+/* return the offset of padding or -1 if none */
+int find_padding (Crypt_GCrypt gcr, unsigned char *string, size_t string_len) {
+    unsigned char last_char = string[string_len-1];
+    size_t i, offset;
+    void *p;
+    
+    switch (gcr->padding) {
+		case CG_PADDING_STANDARD:
+			/* padding length is last_char */
+			for (i = 1; i <= last_char; ++i) {
+                if (string[string_len-i] != last_char) return -1;
+            }
+            return string_len-last_char;
+            
+		case CG_PADDING_NULL:
+            p = memchr((char *) string, '\0', string_len);
+            if (p == NULL) return -1;
+            
+            offset = (int) p - (int) string;
+            for (i = offset; i < string_len; ++i) {
+                if (string[string_len-i] != '\0') return -1;
+            }
+            return offset;
+    		
+		case CG_PADDING_SPACE:
+            p = memchr((char *) string, '\32', string_len);
+            if (p == NULL) return -1;
+            
+            offset = (int) p - (int) string;
+            for (i = offset; i < string_len; ++i) {
+                if (string[string_len-i] != '\32') return -1;
+            }
+            return offset;
+	}
+    return -1;
+}
 
 MODULE = Crypt::GCrypt		PACKAGE = Crypt::GCrypt	PREFIX = cg_
 
@@ -82,6 +122,8 @@ cg_new(...)
 		RETVAL->type = -1;
 		RETVAL->padding = CG_PADDING_STANDARD;
 		RETVAL->action = CG_ACTION_NONE;
+        RETVAL->need_to_call_finish = 0;
+        RETVAL->buffer_is_decrypted = 0;
 		c_flags = 0;
 		ac_flags = 0;
 		have_mode = 0;
@@ -105,6 +147,8 @@ cg_new(...)
 			}
 			if (strcmp(s, "padding") == 0) {
 				s = SvPV_nolen(ST(i+1));
+				if (strcmp(s, "none") == 0)
+					RETVAL->padding = CG_PADDING_NONE;
 				if (strcmp(s, "standard") == 0)
 					RETVAL->padding = CG_PADDING_STANDARD;
 				if (strcmp(s, "null") == 0)
@@ -193,6 +237,9 @@ cg_encrypt(gcr, in)
     	
 		ibuf = SvPV(in, ilen);
 		
+		if (gcr->padding == CG_PADDING_NONE && ilen % gcr->blklen > 0)
+            croak("'None' padding requires that input to ->encrypt() is supplied as a multiple of blklen");
+		
 		/* Get total buffer+ibuf length */
 		Newz(0, curbuf, ilen + gcr->buflen, char);
 		memcpy(curbuf, gcr->buffer, gcr->buflen);
@@ -231,46 +278,70 @@ cg_finish(gcr)
 	Crypt_GCrypt gcr;
     PREINIT:
 		char *obuf;
-		size_t rlen;
+		size_t rlen, return_len, padding_length;
     CODE:
-    	if (gcr->action != CG_ACTION_ENCRYPT)
-    		croak("start('encrypting') was not called");
-
-    	if (gcr->buflen < gcr->blklen) {
-    		unsigned char *tmpbuf;
-    		rlen = gcr->blklen - gcr->buflen;
-    		Newz(0, tmpbuf, gcr->buflen+rlen, unsigned char);
-    		memcpy(tmpbuf, gcr->buffer, gcr->buflen);
-    		switch (gcr->padding) {
-    			case CG_PADDING_STANDARD:
-	    			memset(tmpbuf + gcr->buflen, rlen, rlen);
-	    			break;
-    			case CG_PADDING_NULL:
-	    			memset(tmpbuf + gcr->buflen, 0, rlen);
-	    			break;
-    			case CG_PADDING_SPACE:
-	    			memset(tmpbuf + gcr->buflen, '\32', rlen);
-	    			break;
-	    	}
-	    	Safefree(gcr->buffer);
-    		gcr->buffer = tmpbuf;
-    	} else {
-    		if (gcr->padding == CG_PADDING_NULL && gcr->blklen == 8) {
-    			unsigned char *tmpbuf;
-    			Newz(0, tmpbuf, gcr->buflen+8, unsigned char);
-    			memcpy(tmpbuf, gcr->buffer, gcr->buflen);
-    			memset(tmpbuf + gcr->buflen, 0, 8);
-    			Safefree(gcr->buffer);
-    			gcr->buffer = tmpbuf;
+        gcr->need_to_call_finish = 0;
+        if (gcr->action == CG_ACTION_ENCRYPT) {
+            
+            if (gcr->buflen < gcr->blklen) {
+        		unsigned char *tmpbuf;
+        		rlen = gcr->blklen - gcr->buflen;
+        		Newz(0, tmpbuf, gcr->buflen+rlen, unsigned char);
+        		memcpy(tmpbuf, gcr->buffer, gcr->buflen);
+        		switch (gcr->padding) {
+        			case CG_PADDING_STANDARD:
+    	    			memset(tmpbuf + gcr->buflen, rlen, rlen);
+    	    			break;
+        			case CG_PADDING_NULL:
+    	    			memset(tmpbuf + gcr->buflen, 0, rlen);
+    	    			break;
+        			case CG_PADDING_SPACE:
+    	    			memset(tmpbuf + gcr->buflen, '\32', rlen);
+    	    			break;
+    	    	}
+    	    	Safefree(gcr->buffer);
+        		gcr->buffer = tmpbuf;
+        	} else {
+        		if (gcr->padding == CG_PADDING_NULL && gcr->blklen == 8) {
+        			unsigned char *tmpbuf;
+        			Newz(0, tmpbuf, gcr->buflen+8, unsigned char);
+        			memcpy(tmpbuf, gcr->buffer, gcr->buflen);
+        			memset(tmpbuf + gcr->buflen, 0, 8);
+        			Safefree(gcr->buffer);
+        			gcr->buffer = tmpbuf;
+        		}
+        	}
+        	Newz(0, obuf, gcr->blklen, char);
+    		if ((gcr->err = gcry_cipher_encrypt(gcr->h, obuf, gcr->blklen, gcr->buffer, gcr->blklen)) != 0)
+    			croak("encrypt: %s", gcry_strerror(gcr->err));
+    		gcr->buffer[0] = '\0';
+    		gcr->buflen = 0;
+    		RETVAL = newSVpvn(obuf, gcr->blklen);
+    		Safefree(obuf);
+    		
+        } else {  /* CG_ACTION_DECRYPT */
+            
+            /* decrypt remaining ciphertext if any */
+            New(0, obuf, gcr->buflen, char);
+            return_len = gcr->buflen;
+            if (gcr->buflen > 0) {
+                if (gcr->buffer_is_decrypted == 1) {
+                    Move(gcr->buffer, obuf, gcr->buflen, char);
+                } else {
+                    if ((gcr->err = gcry_cipher_decrypt(gcr->h, obuf, return_len, gcr->buffer, gcr->buflen)) != 0)
+        			    croak("decrypt: %s", gcry_strerror(gcr->err));
+        		}
+    			gcr->buffer[0] = '\0';
+    			gcr->buflen = 0;
+                
+                /* Remove padding */
+                return_len = find_padding(gcr, (unsigned char *) obuf, return_len);
+                printf("return_len = %d\n", return_len);
     		}
-    	}
-    	Newz(0, obuf, gcr->blklen, char);
-		if ((gcr->err = gcry_cipher_encrypt(gcr->h, obuf, gcr->blklen, gcr->buffer, gcr->blklen)) != 0)
-			croak("encrypt: %s", gcry_strerror(gcr->err));
-		gcr->buffer[0] = '\0';
-		RETVAL = newSVpvn(obuf, gcr->blklen);
-		Safefree(obuf);
-		/* DESTROY(gcr); */
+            
+            RETVAL = newSVpvn(obuf, return_len);
+            Safefree(obuf);
+        }
     OUTPUT:
 		RETVAL
 
@@ -281,49 +352,58 @@ cg_decrypt(gcr, in)
 	Crypt_GCrypt gcr;
 	SV *in;
     PREINIT:
-		char *ibuf, *obuf;
-		size_t len, ilen, dlen, plen;
-		int error;
+		unsigned char *ibuf, *obuf, *ciphertext, *decrypted_buffer;
+		size_t total_len, len, ilen;
+        int ciphertext_offset;
     CODE:
     	if (gcr->action != CG_ACTION_DECRYPT)
     		croak("start('decrypting') was not called");
     	
-		ibuf = SvPV(in, ilen);
-		if ((len = ilen % gcr->blklen) == 0) {
-			len = ilen;
-		} else {
+		ibuf = (unsigned char *) SvPV(in, ilen);
+		if ((ilen % gcr->blklen) > 0 || ilen == 0)
 			croak("input must be a multiple of blklen");
-			/* unsigned char *b; */
-			/* len = ilen + gcr->blklen - len;*/
-			/* New(0, b, len, unsigned char);*/
-			/* memcpy(b, ibuf, ilen);*/
-			/* memset(b + ilen, 0, len - ilen);*/
-			/* ibuf = b;*/
-		}
-		New(0, obuf, len, char);
-		if ((error = gcry_cipher_decrypt(gcr->h, obuf, len, ibuf, len)) != 0)
-			croak("decrypt: %s", gcry_strerror(error));
-		if (len != ilen)
-			Safefree(ibuf);
 		
-		/* Remove padding */
-		dlen = len;
-    	switch (gcr->padding) {
-			case CG_PADDING_STANDARD:
-				plen = (int) obuf[len-1];
-				if (obuf[len-1] == obuf[len-plen])
-					dlen = len - plen;
-	    		break;
-			case CG_PADDING_NULL:
-				dlen = strchr((char *)obuf, '\0') - (char *)obuf;
-	    		break;
-			case CG_PADDING_SPACE:
-				/* This is not secure, we have to rewrite it: */
-				dlen = strchr((char *)obuf, '\32') - (char *)obuf;
-	    		break;
+		/* Concatenate buffer and input to get total length of ciphertext */
+		total_len = gcr->buflen + ilen;  /* total_len is a multiple of blklen */
+		Newz(0, ciphertext, total_len, unsigned char);
+        Move(gcr->buffer, ciphertext, gcr->buflen, unsigned char);
+        Move(ibuf, ciphertext+gcr->buflen, ilen, unsigned char);
+		
+		/* if our buffer was decrypted by the previous run of this method,
+		   we set a ciphertext_offset to avoid re-decrypting such plaintext
+		   coming from the buffer */
+        ciphertext_offset = (gcr->buffer_is_decrypted == 1) ? gcr->buflen : 0;
+		
+		/* strip last block and move it to buffer */
+		len = total_len - gcr->blklen;  /* len is the length of plaintext we're returning */
+        Move(ciphertext+len, gcr->buffer, (total_len - len), unsigned char);
+        gcr->buflen = gcr->blklen;
+		
+		/* do actual decryption */
+		New(0, obuf, len, unsigned char);
+        Copy(ciphertext, obuf, ciphertext_offset, unsigned char);
+		if (len-ciphertext_offset > 0) { /* that is, if we have something to decrypt */
+		    if ((gcr->err = gcry_cipher_decrypt(gcr->h, obuf+ciphertext_offset, len-ciphertext_offset, ciphertext+ciphertext_offset, len-ciphertext_offset)) != 0)
+			    croak("decrypt: %s", gcry_strerror(gcr->err));
 		}
-		/* printf("dlen: %d\n", dlen); */
-		RETVAL = newSVpvn(obuf, dlen);
+    	Safefree(ciphertext);
+		
+		/* OPTIMIZATION for compatibility with implementations of Crypt::GCrypt <= 1.17:
+		   decrypt buffer and check if it seems padded */
+		if ((gcr->err = gcry_cipher_decrypt(gcr->h, gcr->buffer, gcr->buflen, NULL, 0)) != 0) /* in-place decryption */
+		                 croak("decrypt: %s", gcry_strerror(gcr->err));
+        gcr->buffer_is_decrypted = 1;
+        if (find_padding(gcr, gcr->buffer, gcr->buflen) == -1) {
+            /* if the string doesn't appear to be padded, let's append it to the
+               output so that users who don't call ->finish() don't break their applications */
+            Renew(obuf, len + gcr->buflen, unsigned char);
+            Move(gcr->buffer, obuf+len, gcr->buflen, unsigned char);
+            len = len + gcr->buflen;
+            gcr->buffer[0] = '\0';
+            gcr->buflen = 0;
+            gcr->buffer_is_decrypted = 0;
+        }
+		RETVAL = newSVpvn((char *) obuf, len);
 		Safefree(obuf);
     OUTPUT:
 		RETVAL
@@ -340,6 +420,7 @@ cg_sign(gcr, in)
 		const char *label;
 		char* outbuf;
     CODE:
+        /*
     	in_mpi = gcry_mpi_new(0);
     	out_mpi = gcry_mpi_new(0);
     	inbuf = SvPV(in, len);
@@ -356,6 +437,7 @@ cg_sign(gcr, in)
 		gcry_mpi_print(GCRYMPI_FMT_STD, outbuf, 1024, NULL, out_mpi);
     	printf("After\n");
 		RETVAL = newSVpv(outbuf, 0);
+		*/
     OUTPUT:
 		RETVAL
 
@@ -370,6 +452,7 @@ cg_start(gcr, act)
     	gcr->err = gcry_cipher_reset(gcr->h);
     	New(0, gcr->buffer, gcr->blklen, unsigned char);
     	gcr->buflen = 0;
+        gcr->need_to_call_finish = 1;
     	action = SvPV(act, len);
     	switch (action[0]) {
     		case 'e':
@@ -391,9 +474,6 @@ cg_setkey(gcr, ...)
 		gcry_mpi_t mpi;
 		size_t len;
     CODE:
-    	if (gcr->action == CG_ACTION_NONE)
-    		croak("start() must be called before setkey()");
-    	
 		/* Set key for cipher */
 		if (gcr->type == CG_TYPE_CIPHER) {
 			Newz(0, k, gcr->keylen, char);
@@ -488,12 +568,12 @@ void
 cg_DESTROY(gcr)
 	Crypt_GCrypt gcr;
     CODE:
-    	if (gcr->type == CG_TYPE_CIPHER) {
-			gcry_cipher_close(gcr->h);
-		}
-    	if (gcr->type == CG_TYPE_ASYMM) {
-			gcry_ac_close(gcr->h_ac);
-		}
+    	if (gcr->type == CG_TYPE_CIPHER) gcry_cipher_close(gcr->h);
+    	if (gcr->type == CG_TYPE_ASYMM)  gcry_ac_close(gcr->h_ac);
+		
+		if (gcr->need_to_call_finish == 1)
+            warn("WARNING: the ->finish() method was not called after encryption/decryption.");
+		    
 		Safefree(gcr->buffer);
 		Safefree(gcr);
 

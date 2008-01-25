@@ -4,7 +4,7 @@
 #########################
 
 use Test;
-BEGIN { plan tests => 15 }; # <--- number of tests
+BEGIN { plan tests => 17 }; # <--- number of tests
 
 use ExtUtils::testlib;
 use Crypt::GCrypt;
@@ -35,6 +35,7 @@ ok($e eq $e0) or print STDERR "[",unpack('H*',$e),"]\n";
 $c->setiv();
 $c->start('decrypting');
 $d = $c->decrypt($e);
+$d .= $c->finish;
 ok(substr($d, 0, length $p) eq $p)
   or print STDERR "[",unpack('H*',$d),"]\n";;
 
@@ -67,6 +68,7 @@ ok($e eq pack('H*', '9c93705d7b3348c73cd2047ce5ecc1a8'))
 $c->start('decrypting');
 $c->setiv($iv);
 $d = $c->decrypt($e);
+$d .= $c->finish;
 ok(substr($d, 0, length $p) eq $p)
  or print STDERR "[$d|",unpack('H*',$d),"]\n";
 
@@ -85,5 +87,19 @@ ok($e eq pack('H*', '02a98d20a176729ea7cd'))
 $c->setkey($key);
 $c->start('decrypting');
 $d = $c->decrypt($e);
+$d .= $c->finish;
 ok(substr($d, 0, length $p) eq $p)
  or print STDERR "[$d|",unpack('H*',$d),"]\n";
+
+### 'none' padding
+{
+    $c = Crypt::GCrypt->new(
+    	type => 'cipher', 
+    	algorithm => 'aes',
+    	padding => 'none'
+    );
+    $c->start('encrypting');
+    ok(!eval {my $e2 = $c->encrypt('aaa'); 1});  # this should die
+    ok(eval { my $e2 = $c->encrypt('aaaaaaaaaaaaaaaa') . $c->finish; 1 });  # this should not die
+}
+

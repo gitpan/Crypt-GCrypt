@@ -15,7 +15,7 @@ package Crypt::GCrypt;
 use strict;
 use warnings;
 
-our $VERSION = '1.17';
+our $VERSION = '1.19';
 
 require XSLoader;
 XSLoader::load('Crypt::GCrypt', $VERSION);
@@ -41,10 +41,11 @@ Crypt::GCrypt - Perl interface to the GNU Cryptographic library
   $cipher->setkey('my secret key');
   $cipher->setiv('my init vector');
 
-  $ciphertext = $cipher->encrypt('plaintext');
+  $ciphertext  = $cipher->encrypt('plaintext');
   $ciphertext .= $cipher->finish;
 
   $plaintext  = $cipher->decrypt($ciphertext);
+  $plaintext .= $cipher->finish;
 
 =head1 ABSTRACT
 
@@ -182,6 +183,11 @@ Only for text strings. The block will be padded with null bytes (00). If the las
 block is a full block and blocksize is 8, a block of "0000000000000000" will be 
 appended.
 
+=item B<none>
+
+By setting the padding method to "none", Crypt::GCrypt will only accept a multiple
+of blklen as input for L</"encrypt()">.
+
 =back
 
 =item secure
@@ -234,12 +240,14 @@ end you'll have to call L</"finish()">.
 =head2 finish()
 
     $ciphertext .= $cipher->finish;
+    
+    $plaintext .= $cipher->finish;
 
 The CBC algorithm must buffer data blocks internally until there are even 
 multiples of the encryption algorithm's blocksize (typically 8 or 16 bytes).
-After the last call to encrypt() you should call finish() to flush the internal
-buffer and return any leftover ciphertext. The internal buffer will be padded
-before encryption (see the L</padding> option above).
+After the last call to encrypt() or decrypt() you should call finish() to flush 
+the internal buffer and return any leftover data. This method will also take care
+of padding/unpadding of data (see the L</padding> option above).
 
 =head2 decrypt()
 
@@ -247,6 +255,8 @@ before encryption (see the L</padding> option above).
 
 The counterpart to encrypt, decrypt takes a I<$ciphertext> and produces the
 original plaintext (given that the right key was used, of course).
+The output is buffered; this means that you'll only get multiples of $cipher's 
+block size and that at the end you'll have to call L</"finish()">.
 
 =head2 keylen()
 
