@@ -1,3 +1,7 @@
+version 1.21 (2009/02/04):
+
+    - added Devel::CheckLib to avoid FAIL reports from CPAN testers
+
 version 1.20 (2008/01/25):
 
     - new "none" padding method
