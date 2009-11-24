@@ -5,14 +5,18 @@
 
 use strict;
 use warnings;
+use Config;
 use Test::More;
 use ExtUtils::testlib;
 use Crypt::GCrypt;
 use IO::Socket;
+$SIG{PIPE} = 'IGNORE';
 
 #########################
 
-use threads;
+if (!$Config{useithreads} || !eval "use threads; 1") {
+    plan skip_all => "Skipping because your perl is not compiled with thread support";
+}
 
 my @algos = ('aes', 'twofish', 'blowfish', 'arcfour', 'cast5', 'des', 'serpent', 'seed');
 
@@ -85,13 +89,23 @@ sub consumer_thread {
   $dec->setkey($key);
   my $buf;
   my $out;
-  my $count = 0;
-  while ($p->read($buf, $dec->blklen())) {
-    $out .= $dec->decrypt($buf);
+  my $bytesreceived = 0;
+  my $thispacket = 0;
+  while (($thispacket = $p->read($buf, $dec->blklen())) ||
+         ($bytesreceived == 0)) { # keep trying if we haven't gotten
+                                  # anything yet
+    if ($thispacket) {
+      $out .= $dec->decrypt($buf);
+      $bytesreceived += $thispacket;
+    } else {
+      sleep(1); # if we got nothing initially, avoid a busy-loop
+    }
   }
   $p->close();
   $out .= $dec->finish();
-  printf("Threaded: failed to match output with algorithm '%s'\n", $algo) if ($str ne $out);
+  printf("Threaded: failed to match output with algorithm '%s'\n".
+         "Wanted: %s\n   Got: %s\n", $algo, unpack('H*', $str),
+         unpack('H*', $out)) if ($str ne $out);
   return $str eq $out;
 }
 

@@ -1,3 +1,9 @@
+version 1.23_02 (2009/11/24):
+
+    - 07-thread.t now passes on MacOS X (dkg)
+    - don't try to link to pthread.h if perl isn't compiled with ithreads
+      and Pthread
+
 version 1.23_01 (2009/11/24):
 
     - added new version check functions gcrypt_version() and 
