@@ -224,7 +224,7 @@ for $data (sort keys %dgsts) {
     die "failed to create digest object with algorithm $algo" unless defined $md;
     $md->write($data);
     my $result = unpack('H*', $md->read());
-    printf("(%s) '%s': %s != %s\n", $algo, $data, $result, $dgsts{$data}{$algo}) unless ($result eq $dgsts{$data}{$algo});
+    warn sprintf("(%s) '%s': %s != %s\n", $algo, $data, $result, $dgsts{$data}{$algo}) unless ($result eq $dgsts{$data}{$algo});
     ok($result eq $dgsts{$data}{$algo});
   }
 }
@@ -240,7 +240,7 @@ for $data (sort keys %hmacs) {
     die "failed to create HMAC digest object with algorithm $algo" unless defined $md;
     $md->write($data);
     my $result = unpack('H*', $md->read());
-    printf("HMAC (%s) '%s': %s != %s\n", $algo, $data, $result, $hmacs{$data}{$algo}) unless ($result eq $hmacs{$data}{$algo});
+    warn sprintf("HMAC (%s) '%s': %s != %s\n", $algo, $data, $result, $hmacs{$data}{$algo}) unless ($result eq $hmacs{$data}{$algo});
     ok($result eq $hmacs{$data}{$algo});
   }
 }
