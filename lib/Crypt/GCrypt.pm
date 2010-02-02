@@ -15,7 +15,7 @@ package Crypt::GCrypt;
 use strict;
 use warnings;
 
-our $VERSION = '1.23';
+our $VERSION = '1.24';
 
 require XSLoader;
 XSLoader::load('Crypt::GCrypt', $VERSION);
@@ -408,6 +408,11 @@ digest object has been read(), it may not be written to.
 
 libgcrypt is initialized with support for Pthread, so this module should be 
 thread safe.
+
+=head1 SEE ALSO
+
+Crypt::GCrypt::MPI supports Multi-precision integers (bignum math)
+using libgcrypt as the backend implementation.
 
 =head1 BUGS AND FEEDBACK
 
