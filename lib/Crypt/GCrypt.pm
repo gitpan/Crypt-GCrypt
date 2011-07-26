@@ -15,10 +15,12 @@ package Crypt::GCrypt;
 use strict;
 use warnings;
 
-our $VERSION = '1.24';
+our $VERSION = '1.25';
 
 require XSLoader;
 XSLoader::load('Crypt::GCrypt', $VERSION);
+
+sub CLONE_SKIP { 1 }
 
 1;
 __END__
@@ -424,7 +426,7 @@ or complaints.
 
 Alessandro Ranellucci E<lt>aar@cpan.orgE<gt>
 
-Daniel Kahn Gillmor (message digests) E<lt>dkg@fifthhorseman.net<gt>
+Daniel Kahn Gillmor (message digests) E<lt>dkg@fifthhorseman.netE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
