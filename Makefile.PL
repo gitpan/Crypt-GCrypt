@@ -1,5 +1,16 @@
 use lib qw(inc);
 use Devel::CheckLib;
+
+# Prompt the user here for any paths and other configuration
+
+check_lib_or_exit(
+    # fill in what you prompted the user for here
+    lib => [qw()]
+);
+
+
+use lib qw(inc);
+use Devel::CheckLib;
 use ExtUtils::MakeMaker;
 use Config;
 use strict;
@@ -45,7 +56,7 @@ WriteMakefile(
     'VERSION_FROM' => 'lib/Crypt/GCrypt.pm',
     'LIBS'         => $libs,
     'DEFINE'       => '',
-    'CCFLAGS'      => '-funsigned-char',
+    'CCFLAGS'      => "-funsigned-char $Config{ccflags}",
     'dist'         => { COMPRESS => 'gzip', SUFFIX => 'gz' },
     'DISTNAME' => 'Crypt-GCrypt',
     'LICENSE' => 'perl',

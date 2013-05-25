@@ -21,3 +21,4 @@ t/09-clone-digest.t
 t/10-versions.t
 t/20-mpi.t
 typemap
+META.json                                Module JSON meta-data (added by MakeMaker)
